@@ -1,3 +1,4 @@
+import os
 import logging
 
 def setup_logging(log_file="output.log", level=logging.INFO):
@@ -17,6 +18,9 @@ def setup_logging(log_file="output.log", level=logging.INFO):
 
     # Prevent adding multiple handlers if the function is called multiple times
     if not logger.handlers:
+        # Ensure log directory exists
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
         # Create file handler which logs even debug messages
         file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(level)
@@ -36,7 +40,7 @@ def setup_logging(log_file="output.log", level=logging.INFO):
 
     return logger
 
-LOGGER = setup_logging()
+# LOGGER = setup_logging()
 
 # Example usage (optional, for testing logger_config.py directly)
 # if __name__ == "__main__":

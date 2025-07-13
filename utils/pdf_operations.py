@@ -32,7 +32,7 @@ def check_pdf_downloadable(urls):
                 downloadable_pdfs.append(url)
                 LOGGER.info(f"Found PDF: {url}")
             else:
-                LOGGER.debug(f"Skipping: {url} - Content-Type is not PDF: {content_type}")
+                LOGGER.info(f"Skipping: {url} - Content-Type is not PDF: {content_type}")
 
         except requests.exceptions.RequestException as e:
             LOGGER.warning(f"Error checking {url}: {e}")  # Use warning for network errors

@@ -1,83 +1,14 @@
 import os
+import json
+from tqdm import tqdm
 from typing import List, Dict
-from pathlib import Path
-import re
-from pathlib import Path
 import asyncio
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode, BrowserConfig
-from utils.logger import setup_logging
-
-
-ROOT_PATH = os.getcwd()
-CRAWL_PATH = os.path.join(ROOT_PATH, 'crawl')
-DATA_PATH = os.path.join(ROOT_PATH, 'data')
-THAIJO_DATA_PATH = os.path.join(DATA_PATH, 'thaijo')
-LOGGER = setup_logging(log_file=os.path.join(THAIJO_DATA_PATH, "thaijo_scrape.log"))
+from . import THAIJO_DATA_PATH, LOGGER
+from .utils import extract_markdown_from_h2, extract_markdown_links_as_json, extract_pdf_links_from_markdown, get_pdf_links_from_json, check_pdf_downloadable, download_pdfs
 
 
 URL = "https://www.tci-thaijo.org/"
-
-
-def extract_markdown_from_h2(input_filepath: str, target_h2_text: str) -> str:
-    """
-    Reads a Markdown file, finds the specified H2 tag, and saves all content
-    from that H2 tag to the end of the file into a new output file.
-
-    Args:
-        input_filepath (str): The path to the input Markdown file.
-        target_h2_text (str): The exact text of the H2 tag to search for.
-                              (e.g., "วารสารทั้งหมด" for "## วารสารทั้งหมด")
-    """
-    try:
-        # Ensure the input file exists
-        if not os.path.exists(input_filepath):
-            print(f"Error: Input file not found at '{input_filepath}'")
-            return
-
-        # Read the entire content of the input Markdown file
-        with open(input_filepath, "r", encoding="utf-8") as file:
-            content = file.read()
-
-        # Construct the Markdown H2 tag pattern to search for
-        # We use a regex to be flexible with spaces after '##'
-        # re.escape is used to escape any special characters in the target_h2_text
-        import re
-        search_pattern = re.compile(r'^##\s*' + re.escape(target_h2_text) + r'\s*$', re.MULTILINE)
-
-        # Search for the target H2 tag
-        match = search_pattern.search(content)
-
-        if match:
-            # Get the starting index of the matched H2 tag
-            start_index = match.start()
-            # Extract content from the start_index to the end of the file
-            extracted_content = content[start_index:]
-            return extracted_content
-        else:
-            LOGGER.warning(f"Warning: H2 tag with text '{target_h2_text}' not found in '{input_filepath}'. No content saved.")
-            return 
-    except Exception as e:
-        LOGGER.error(f"An error occurred: {e}")
-
-
-def extract_markdown_links_as_json(markdown_text: str) -> List[Dict[str, str]]:
-    """
-    Extracts all Markdown-style links with optional titles from a string
-    and returns them as a list of {label: url} dictionaries.
-
-    Args:
-        markdown_text (str): The markdown content as a string.
-
-    Returns:
-        List[Dict[str, str]]: A list of label-URL pairs as dictionaries.
-    """
-    # Match pattern: [label](url "title")
-    pattern = re.compile(r'\[\s*(.*?)\s*\]\(\s*(\S+)(?:\s+"(.*?)")?\s*\)')
-    
-    matches = pattern.findall(markdown_text)
-    
-    # Return as list of dicts: {label: url}
-    return [{label: url} for label, url, _ in matches]
 
 
 async def crawl_thaijo():
@@ -154,10 +85,71 @@ async def crawl_thaijo():
         print(f"✅ Save scraping result to {save_md_path}")
 
 
-if __name__ == "__main__":
-    asyncio.run(crawl_thaijo())
+async def cralw_pdf_links(web_urls: List[Dict], headless=True): # example: [{"Source A": "https://source-a.com"}]
 
+    browser_config = BrowserConfig(
+        headless=headless, # set to False for debugging | show browser
+        viewport_width=1280,
+        viewport_height=720,
+        verbose=False,
+    )
+
+    results = {}
+    
+    for i, item in tqdm(enumerate(web_urls)):
+        
+        source_name, source_url = list(item.items())[0]
+        LOGGER.info(f"source name: {source_name}, source_url: {source_url}")
+        LOGGER.info("Start crawling ...")
+
+        crawler_config = CrawlerRunConfig(
+            session_id=source_name,
+            cache_mode=CacheMode.BYPASS,
+        )
+
+        async with AsyncWebCrawler(config=browser_config) as crawler:
+            # Scrape webpage
+            result = await crawler.arun(
+                url=source_url,  # Another pass
+                config=crawler_config,
+            )
+
+            # extract pdf links from markdown result
+            pdf_links = extract_pdf_links_from_markdown(markdown_text=result.markdown)
+
+            LOGGER.info(f"✅ HTML Length After Click: {len(result.cleaned_html)}")
+            LOGGER.info("\n ======= Preview all the pdf links =======\n")
+            LOGGER.info(f"{pdf_links}\n")
+
+            # append to results dict
+            results[str(i)] = {
+                "url": source_url,
+                "links": pdf_links,
+                "source_name": source_name
+            }
+
+    # Save to JSON file
+    output_file = os.path.join(THAIJO_DATA_PATH, "thaijo_pdf_links.json")
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=4) # ensure_ascii=False = preserved thai characters
+    LOGGER.info(f"✅ Save scraping result to {output_file}")
+    LOGGER.info("\n============== End ==============\n")
+
+
+if __name__ == "__main__":
+    # step 1: scrape the website to get overall magazine list & save .md result
+    # asyncio.run(crawl_thaijo())
+
+    # step 2: get all the magazine's web urls
     extracted_content = extract_markdown_from_h2(input_filepath=f"{THAIJO_DATA_PATH}/thaijo_markdown.md",
                                                  target_h2_text="วารสารทั้งหมด")
     links = extract_markdown_links_as_json(markdown_text=extracted_content)
-    
+
+    # step 3: extract pdf links through each magazine source
+    asyncio.run(cralw_pdf_links(web_urls=links))
+
+    # step 4: get all scraped pdf links
+    json_file = os.path.join(THAIJO_DATA_PATH, "thaijo_pdf_links.json")
+    all_pdf_links = get_pdf_links_from_json(json_file)
+    print(f"all pdf links: {all_pdf_links}")
+
