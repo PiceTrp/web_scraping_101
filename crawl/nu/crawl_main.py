@@ -96,8 +96,9 @@ def download_pdf_with_retries(
                         ext = ".pdf"
                     
                     # * add timestamp to avoid conflicts
+                    max_name_length = 100  # avoid file name too long error
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"{name}_{timestamp}{ext}"
+                    filename = f"{name[:max_name_length]}_{timestamp}{ext}"
                     filepath = os.path.join(save_dir, filename)
                     
                     # * download with progress tracking
@@ -280,10 +281,10 @@ async def crawl_and_download_pdf(url: str) -> List[str]:
 
 
 async def main():
-    MAX_ID = 6500
+    MAX_ID = 1000
     results = load_existing_results()
 
-    for index in tqdm(range(5000, MAX_ID)):
+    for index in tqdm(range(1, MAX_ID)):
         # our target url to each ku webpage
         target_url = f"https://nuir.lib.nu.ac.th/dspace/handle/123456789/{index}"
 

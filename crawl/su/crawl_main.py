@@ -2,8 +2,7 @@ import os
 import json
 from tqdm import tqdm
 import asyncio
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-from bs4 import BeautifulSoup
+from crawl4ai import AsyncWebCrawler, BrowserConfig
 from . import LOGGER
 import re
 from typing import List, Optional, Dict
@@ -97,8 +96,9 @@ def download_pdf_with_retries(
                         ext = ".pdf"
                     
                     # * add timestamp to avoid conflicts
+                    max_name_length = 100  # avoid file name too long error
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"{name}_{timestamp}{ext}"
+                    filename = f"{name[:max_name_length]}_{timestamp}{ext}"
                     filepath = os.path.join(save_dir, filename)
                     
                     # * download with progress tracking
@@ -180,24 +180,28 @@ def download_pdf_with_retries(
     return None
 
 
-def extract_download_links_from_markdown(markdown_content: str) -> List[Dict]:
-   # * pattern to match markdown links containing "dowload_digital_file"
-   pattern = r'\[([^\]]+)\]\((https?://[^\s\)]*dowload_digital_file[^\s\)]*)[^\)]*\)'
+def extract_pdf_links_with_label_check(markdown_content: str) -> List[Dict]:
+    """
+    Extracts markdown links where both the label and the href contain '.pdf'.
 
-   # * find all matches
-   matches = re.findall(pattern, markdown_content)
-   
-   extracted_links = []
-   for match in matches:
-       link_text = match[0].strip()
-       url = match[1]
-       
-       extracted_links.append({
-           'text': link_text,
-           'download_url': url
-       })
-   
-   return extracted_links
+    Args:
+        markdown_content (str): The markdown string to search.
+
+    Returns:
+        List[Dict]: A list of dictionaries with 'text' and 'download_url'.
+    """
+    pattern = r'\*?\s*\[([^\]]*\.pdf[^\]]*)\]\((https?://[^\s\)]*\.pdf)[^\)]*\)'
+
+    matches = re.findall(pattern, markdown_content)
+    
+    extracted_links = []
+    for link_text, url in matches:
+        extracted_links.append({
+            'text': link_text.strip(),
+            'download_url': url
+        })
+
+    return extracted_links
 
 
 async def crawl_webpage(url: str, verbose: bool = False):
@@ -222,7 +226,7 @@ async def crawl_webpage(url: str, verbose: bool = False):
 
 def get_download_links(result_markdown: str):
     LOGGER.info("[LINK EXTRACTION] Searching for download links...")
-    links_to_download = extract_download_links_from_markdown(result_markdown)
+    links_to_download = extract_pdf_links_with_label_check(result_markdown)
     if not links_to_download:
         LOGGER.warning("[NO LINKS] No download links found in content")
         return None
@@ -277,12 +281,12 @@ async def crawl_and_download_pdf(url: str) -> List[str]:
 
 
 async def main():
-    MAX_ID = 192000
+    MAX_ID = 2000
     results = load_existing_results()
 
-    for index in tqdm(range(190450, MAX_ID)):
+    for index in tqdm(range(1001, MAX_ID)):
         # our target url to each ku webpage
-        target_url = f"https://kukr.lib.ku.ac.th/kukr_es/kukr/search_detail/result/{index}"
+        target_url = f"http://ithesis-ir.su.ac.th/dspace/handle/123456789/{index}"
 
         # skip already processed
         if str(index) in results: # JSON keys are strings
@@ -299,6 +303,13 @@ async def main():
             # Save after each successful download
             save_results(results)
             LOGGER.info(f"[LOG] Updated results to JSON.")
+        else:
+            metadata = {"source_url": target_url, 
+                        "download_url": None, 
+                        "downloaded_filename": None}
+            results[index] = metadata
+            save_results(results)
+            LOGGER.info(f"[LOG] Updated None results to JSON.")
 
 
 if __name__ == "__main__":
